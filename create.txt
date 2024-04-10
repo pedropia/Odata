@@ -1,0 +1,77 @@
+  METHOD parceiros_create_entity.
+
+    DATA ls_business_partner TYPE zcl_z99_bp_mpc=>ts_parceiro.
+
+    DATA: lt_return                    TYPE bapiret2_t,
+          ls_central_data              TYPE bapibus1006_central,
+          ls_central_data_person       TYPE bapibus1006_central_person,
+          ls_central_data_organization TYPE bapibus1006_central_organ,
+          ls_address_data              TYPE bapibus1006_address,
+          ls_t100                      TYPE scx_t100key.
+
+    TRY.
+        io_data_provider->read_entry_data(
+          IMPORTING
+            es_data = ls_business_partner
+        ).
+      CATCH /iwbep/cx_mgw_tech_exception. " Technical Exception
+    ENDTRY.
+
+    "Set data do central data
+    ls_central_data-searchterm1 = ls_business_partner-search_term1.
+    ls_central_data-searchterm2 = ls_business_partner-search_term2.
+
+    "Set data to address
+    ls_address_data-street = ls_business_partner-street.
+    ls_address_data-house_no = ls_business_partner-house_number.
+    ls_address_data-district = ls_business_partner-district.
+    ls_address_data-city = ls_business_partner-city.
+    ls_address_data-region = ls_business_partner-region.
+    ls_address_data-postl_cod1 = ls_business_partner-zip_code.
+    ls_address_data-country = ls_business_partner-country.
+
+    "Check which type will be created
+    CASE ls_business_partner-partner_type.
+      WHEN 1.
+        ls_central_data_person-firstname = ls_business_partner-partner_name1.
+        ls_central_data_person-lastname = ls_business_partner-partner_name2.
+      WHEN 2.
+        ls_central_data_organization-name1 = ls_business_partner-partner_name1.
+        ls_central_data_organization-name2 = ls_business_partner-partner_name2.
+      WHEN OTHERS.
+        RETURN.
+    ENDCASE.
+
+    "Create business partner
+    CALL FUNCTION 'BAPI_BUPA_CREATE_FROM_DATA'
+      EXPORTING
+        partnercategory         = ls_business_partner-partner_type
+        partnergroup            = 'TCAG'
+        centraldata             = ls_central_data
+        centraldataperson       = ls_central_data_person
+        centraldataorganization = ls_central_data_organization
+        addressdata             = ls_address_data
+      IMPORTING
+        businesspartner         = ls_business_partner-partner_id
+      TABLES
+        return                  = lt_return.
+    "Check if an error occured
+    READ TABLE lt_return ASSIGNING FIELD-SYMBOL(<return>) WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      ls_t100-msgid = <return>-id.
+      ls_t100-msgno = <return>-number.
+      ls_t100-attr1 = <return>-message_v1.
+      ls_t100-attr2 = <return>-message_v2.
+      ls_t100-attr3 = <return>-message_v3.
+      ls_t100-attr4 = <return>-message_v4.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid      = ls_t100
+          entity_type = iv_entity_name
+          message     = <return>-message.
+    ENDIF.
+
+    er_entity = ls_business_partner.
+
+
+  ENDMETHOD.

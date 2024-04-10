@@ -1,0 +1,157 @@
+  METHOD parceiros_update_entity.
+
+    DATA:
+      ls_parceiro_chave TYPE zcl_z99_bp_mpc=>ts_parceiro,
+      ls_parceiro_corpo TYPE zcl_z99_bp_mpc=>ts_parceiro.
+
+
+    DATA: lt_return                      TYPE bapiret2_t,
+          ls_central_data                TYPE bapibus1006_central,
+          ls_central_data_person         TYPE bapibus1006_central_person,
+          ls_central_data_organization   TYPE bapibus1006_central_organ,
+          ls_address_data                TYPE bapibus1006_address,
+          ls_central_data_x              TYPE bapibus1006_central_x,
+          ls_central_data_person_x       TYPE bapibus1006_central_person_x,
+          ls_central_data_organization_x TYPE bapibus1006_central_organ_x,
+          ls_address_data_x              TYPE bapibus1006_address_x,
+          ls_t100                        TYPE scx_t100key,
+          lv_partner_id                  TYPE bu_partner.
+    "Map key
+    TRY.
+
+        io_tech_request_context->get_converted_keys(
+          IMPORTING
+            es_key_values = ls_parceiro_chave " Entity Key Values - converted
+        ).
+
+
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = ls_parceiro_chave-partner_id
+          IMPORTING
+            output = ls_parceiro_chave-partner_id.
+      CATCH cx_sy_itab_line_not_found.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING
+            entity_type = iv_entity_name
+            message     = TEXT-001. "Key not found in parameters
+    ENDTRY.
+
+    io_data_provider->read_entry_data(
+      IMPORTING
+        es_data = ls_parceiro_corpo
+    ).
+
+    "Set data do central data
+    ls_central_data-searchterm1 = ls_parceiro_corpo-search_term1.
+    ls_central_data-searchterm2 = ls_parceiro_corpo-search_term2.
+    ls_central_data_x-searchterm1 =
+    ls_central_data_x-searchterm2 = abap_true.
+    "Set data to address
+    ls_address_data-street = ls_parceiro_corpo-street.
+    ls_address_data-house_no = ls_parceiro_corpo-house_number.
+    ls_address_data-district = ls_parceiro_corpo-district.
+    ls_address_data-city = ls_parceiro_corpo-city.
+    ls_address_data-region = ls_parceiro_corpo-region.
+    ls_address_data-postl_cod1 = ls_parceiro_corpo-zip_code.
+    ls_address_data-country = ls_parceiro_corpo-country.
+    ls_address_data_x-street =
+    ls_address_data_x-house_no =
+    ls_address_data_x-district =
+    ls_address_data_x-city =
+    ls_address_data_x-region =
+    ls_address_data_x-postl_cod1 =
+    ls_address_data_x-country = abap_true.
+
+    "Check which type will be created
+    CASE ls_parceiro_corpo-partner_type.
+      WHEN 1.
+        ls_central_data_person-firstname = ls_parceiro_corpo-partner_name1.
+        ls_central_data_person-lastname = ls_parceiro_corpo-partner_name2.
+        ls_central_data_person_x-firstname =
+        ls_central_data_person_x-lastname = abap_true.
+      WHEN 2.
+        ls_central_data_organization-name1 = ls_parceiro_corpo-partner_name1.
+        ls_central_data_organization-name2 = ls_parceiro_corpo-partner_name2.
+        ls_central_data_organization_x-name1 =
+        ls_central_data_organization_x-name2 = abap_true.
+      WHEN OTHERS.
+        RETURN.
+    ENDCASE.
+
+    "Change central data
+    CALL FUNCTION 'BAPI_BUPA_CENTRAL_CHANGE'
+      EXPORTING
+        businesspartner           = ls_parceiro_chave-partner_id
+        centraldata               = ls_central_data
+        centraldataperson         = ls_central_data_person
+        centraldataorganization   = ls_central_data_organization
+        centraldata_x             = ls_central_data_x
+        centraldataperson_x       = ls_central_data_person_x
+        centraldataorganization_x = ls_central_data_organization_x
+      TABLES
+        return                    = lt_return.
+    READ TABLE lt_return ASSIGNING FIELD-SYMBOL(<return>) WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+      ls_t100-msgid = <return>-id.
+      ls_t100-msgno = <return>-number.
+      ls_t100-attr1 = <return>-message_v1.
+      ls_t100-attr2 = <return>-message_v2.
+      ls_t100-attr3 = <return>-message_v3.
+      ls_t100-attr4 = <return>-message_v4.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid      = ls_t100
+          entity_type = iv_entity_name
+          message     = <return>-message.
+    ENDIF.
+
+    "Change address data
+    CALL FUNCTION 'BAPI_BUPA_ADDRESS_CHANGE'
+      EXPORTING
+        businesspartner = ls_parceiro_chave-partner_id
+        addressdata     = ls_address_data
+        addressdata_x   = ls_address_data_x
+      TABLES
+        return          = lt_return.
+
+    READ TABLE lt_return ASSIGNING <return> WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+      ls_t100-msgid = <return>-id.
+      ls_t100-msgno = <return>-number.
+      ls_t100-attr1 = <return>-message_v1.
+      ls_t100-attr2 = <return>-message_v2.
+      ls_t100-attr3 = <return>-message_v3.
+      ls_t100-attr4 = <return>-message_v4.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid      = ls_t100
+          entity_type = iv_entity_name
+          message     = <return>-message.
+    ENDIF.
+    "Return changed data to entity
+    "Check if it's a person or an organization
+    IF ls_central_data_person IS NOT INITIAL.
+      er_entity-partner_name1 = ls_central_data_person-firstname.
+      er_entity-partner_name2 = ls_central_data_person-lastname.
+      er_entity-partner_type = '1'.
+    ELSEIF ls_central_data_organization IS NOT INITIAL.
+      er_entity-partner_name1 = ls_central_data_organization-name1.
+      er_entity-partner_name2 = ls_central_data_organization-name2.
+      er_entity-partner_type = '2'.
+    ENDIF.
+    "Map to entity
+    er_entity-partner_id = ls_parceiro_chave-partner_id.
+    er_entity-search_term1 = ls_central_data-searchterm1.
+    er_entity-search_term2 = ls_central_data-searchterm2.
+    er_entity-street = ls_address_data-street.
+    er_entity-house_number = ls_address_data-house_no.
+    er_entity-district = ls_address_data-district.
+    er_entity-city = ls_address_data-city.
+    er_entity-region = ls_address_data-region.
+    er_entity-zip_code = ls_address_data-postl_cod1.
+    er_entity-country = ls_address_data-country.
+
+  ENDMETHOD.

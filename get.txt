@@ -1,0 +1,87 @@
+  METHOD parceiros_get_entity.
+
+    DATA: lt_return                    TYPE bapiret2_t,
+          ls_central_data              TYPE bapibus1006_central,
+          ls_central_data_person       TYPE bapibus1006_central_person,
+          ls_central_data_organization TYPE bapibus1006_central_organ,
+          ls_address_data              TYPE bapibus1006_address,
+          ls_t100                      TYPE scx_t100key,
+          lv_partner_id                TYPE bu_partner,
+          ls_parceiro                  TYPE zcl_z99_bp_mpc=>ts_parceiro.
+
+    TRY.
+        io_tech_request_context->get_converted_keys(
+          IMPORTING
+            es_key_values = ls_parceiro " Entity Key Values - converted
+        ).
+
+
+
+
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = ls_parceiro-partner_id
+          IMPORTING
+            output = lv_partner_id.
+      CATCH cx_sy_itab_line_not_found.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING
+            entity_type = iv_entity_name
+            message     = TEXT-001. "Key not found in parameters
+    ENDTRY.
+
+
+    "Get central data
+    CALL FUNCTION 'BAPI_BUPA_CENTRAL_GETDETAIL'
+      EXPORTING
+        businesspartner         = ls_parceiro-partner_id
+      IMPORTING
+        centraldata             = ls_central_data
+        centraldataperson       = ls_central_data_person
+        centraldataorganization = ls_central_data_organization
+      TABLES
+        return                  = lt_return.
+
+    READ TABLE lt_return ASSIGNING FIELD-SYMBOL(<return>) WITH KEY type = 'E'.
+    IF sy-subrc = 0.
+      ls_t100-msgid = <return>-id.
+      ls_t100-msgno = <return>-number.
+      ls_t100-attr1 = <return>-message_v1.
+      ls_t100-attr2 = <return>-message_v2.
+      ls_t100-attr3 = <return>-message_v3.
+      ls_t100-attr4 = <return>-message_v4.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          textid      = ls_t100
+          entity_type = iv_entity_name
+          message     = <return>-message.
+    ENDIF.
+    "Get address data
+    CALL FUNCTION 'BAPI_BUPA_ADDRESS_GETDETAIL'
+      EXPORTING
+        businesspartner = ls_parceiro-partner_id
+      IMPORTING
+        addressdata     = ls_address_data.
+    "Check if it's a person or an organization
+    IF ls_central_data_person IS NOT INITIAL.
+      er_entity-partner_name1 = ls_central_data_person-firstname.
+      er_entity-partner_name2 = ls_central_data_person-lastname.
+      er_entity-partner_type = '1'.
+    ELSEIF ls_central_data_organization IS NOT INITIAL.
+      er_entity-partner_name1 = ls_central_data_organization-name1.
+      er_entity-partner_name2 = ls_central_data_organization-name2.
+      er_entity-partner_type = '2'.
+    ENDIF.
+    "Map to entity
+    er_entity-partner_id = ls_parceiro-partner_id.
+    er_entity-search_term1 = ls_central_data-searchterm1.
+    er_entity-search_term2 = ls_central_data-searchterm2.
+    er_entity-street = ls_address_data-street.
+    er_entity-house_number = ls_address_data-house_no.
+    er_entity-district = ls_address_data-district.
+    er_entity-city = ls_address_data-city.
+    er_entity-region = ls_address_data-region.
+    er_entity-zip_code = ls_address_data-postl_cod1.
+    er_entity-country = ls_address_data-country.
+
+  ENDMETHOD.

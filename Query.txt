@@ -1,0 +1,182 @@
+  METHOD parceiros_get_entityset.
+
+
+    DATA: lt_result                    TYPE TABLE OF bus020_search_result,
+          lt_entityset                 TYPE zcl_z99_bp_mpc=>tt_parceiro,
+          lt_tech_order                TYPE /iwbep/t_mgw_tech_order,
+          lt_sort                      TYPE abap_sortorder_tab,
+          ls_address                   TYPE bupa_addr_search,
+          ls_central_data              TYPE bapibus1006_central,
+          ls_central_data_person       TYPE bapibus1006_central_person,
+          ls_central_data_organization TYPE bapibus1006_central_organ,
+          ls_address_data              TYPE bapibus1006_address,
+          ls_entityset                 LIKE LINE OF lt_entityset,
+          lv_mc_name1                  TYPE bu_mcname1,
+          lv_mc_name2                  TYPE bu_mcname2,
+          lv_partner                   TYPE bu_partner,
+          lv_sort1                     TYPE bu_sort1,
+          lv_sort2                     TYPE bu_sort2,
+          lv_category                  TYPE bu_type,
+          lv_from                      TYPE i,
+          lv_to                        TYPE i.
+
+
+
+*Ler a query option $filter
+    DATA(lo_filter) = io_tech_request_context->get_filter( ).
+
+    DATA(lv_filter_string) = lo_filter->get_filter_string( ).
+
+    DATA(lv_sql_clause) = io_tech_request_context->get_osql_where_clause_convert( ).
+    DATA(LV_SQL_PLACEHOLDERS) = IO_TECH_REQUEST_CONTEXT->get_osql_with_placeholders( ).
+*    CATCH /iwbep/cx_mgw_busi_exception. " Business Exception
+*    CATCH /iwbep/cx_mgw_busi_exception. " Business Exception
+*    CATCH /iwbep/cx_mgw_tech_exception. " Technical Exception
+*    CATCH /iwbep/cx_mgw_tech_exception. " Technical Exception
+
+    DATA(lt_filter_select_options) = lo_filter->get_filter_select_options( ).
+
+    LOOP AT lt_filter_select_options ASSIGNING FIELD-SYMBOL(<filter>).
+
+      CASE <filter>-property.
+        WHEN 'PARTNER_ID'.
+          lv_partner = <filter>-select_options[ 1 ]-low.
+        WHEN 'PARTNER_NAME1'.
+          lv_mc_name1 = <filter>-select_options[ 1 ]-low.
+        WHEN 'PARTNER_NAME2'.
+          lv_mc_name2 = <filter>-select_options[ 1 ]-low.
+        WHEN 'SEARCH_TERM1'.
+          lv_sort1 = <filter>-select_options[ 1 ]-low.
+        WHEN 'SEARCH_TERM2'.
+          lv_sort2 = <filter>-select_options[ 1 ]-low.
+        WHEN 'PARTNER_TYPE'.
+          lv_category = <filter>-select_options[ 1 ]-low.
+        WHEN 'STREET'.
+          ls_address-street = <filter>-select_options[ 1 ]-low.
+        WHEN 'HOUSENUMBER'.
+          ls_address-house_num1 = <filter>-select_options[ 1 ]-low.
+        WHEN 'DISTRICT'.
+          ls_address-city2 = <filter>-select_options[ 1 ]-low.
+        WHEN 'CITY'.
+          ls_address-city1 = <filter>-select_options[ 1 ]-low.
+        WHEN 'REGION'.
+          ls_address-region = <filter>-select_options[ 1 ]-low.
+        WHEN 'ZIP_CODE'.
+          ls_address-post_code1 = <filter>-select_options[ 1 ]-low.
+        WHEN 'COUNTRY'.
+          ls_address-country = <filter>-select_options[ 1 ]-low.
+      ENDCASE.
+
+    ENDLOOP.
+    IF sy-subrc <> 0.
+
+
+      "If nothing is supplied, set partner ID as *
+      IF lv_partner IS INITIAL AND lv_mc_name1 IS INITIAL
+      AND lv_mc_name2 IS INITIAL AND lv_sort1 IS INITIAL
+      AND lv_sort2 IS INITIAL AND lv_category IS INITIAL
+      AND ls_address-street IS INITIAL AND ls_address-house_num1 IS INITIAL
+      AND ls_address-city2 IS INITIAL AND ls_address-city1 IS INITIAL
+      AND ls_address-region IS INITIAL AND ls_address-post_code1 IS INITIAL
+      AND ls_address-country IS INITIAL.
+        lv_partner = '*'.
+      ENDIF.
+
+
+    ENDIF.
+
+    "Search for BPs
+    CALL FUNCTION 'BUPA_SEARCH'
+      EXPORTING
+        iv_mc_name1      = lv_mc_name1
+        iv_mc_name2      = lv_mc_name2
+        is_address       = ls_address
+        iv_partner       = lv_partner
+        iv_sort1         = lv_sort1
+        iv_sort2         = lv_sort2
+        iv_category      = lv_category
+      TABLES
+        et_search_result = lt_result.
+
+    "Paginação
+    lv_from = io_tech_request_context->get_skip( ) + 1.
+
+    IF io_tech_request_context->get_top( ) = 0.
+      lv_to = lines( lt_result ).
+    ELSE.
+      lv_to = io_tech_request_context->get_top( ) + lv_from - 1.
+    ENDIF.
+
+
+    LOOP AT lt_result ASSIGNING FIELD-SYMBOL(<result>) FROM lv_from
+                                                       TO lv_to.
+
+      CLEAR: ls_central_data,
+      ls_central_data_person,
+      ls_central_data_organization,
+      ls_entityset.
+      CALL FUNCTION 'BAPI_BUPA_CENTRAL_GETDETAIL'
+        EXPORTING
+          businesspartner         = <result>-partner
+        IMPORTING
+          centraldata             = ls_central_data
+          centraldataperson       = ls_central_data_person
+          centraldataorganization = ls_central_data_organization.
+      "Get address data
+      CALL FUNCTION 'BAPI_BUPA_ADDRESS_GETDETAIL'
+        EXPORTING
+          businesspartner = <result>-partner
+        IMPORTING
+          addressdata     = ls_address_data.
+      "Check if it's a person or an organization
+      IF ls_central_data_person IS NOT INITIAL.
+        ls_entityset-partner_name1 = ls_central_data_person-firstname.
+        ls_entityset-partner_name2 = ls_central_data_person-lastname.
+        ls_entityset-partner_type = '1'.
+      ELSEIF ls_central_data_organization IS NOT INITIAL.
+        ls_entityset-partner_name1 = ls_central_data_organization-name1.
+        ls_entityset-partner_name2 = ls_central_data_organization-name2.
+        ls_entityset-partner_type = '2'.
+      ELSE.
+        CONTINUE.
+      ENDIF.
+
+      "Map to entity
+      ls_entityset-partner_id = <result>-partner.
+      ls_entityset-search_term1 = ls_central_data-searchterm1.
+      ls_entityset-search_term2 = ls_central_data-searchterm2.
+      ls_entityset-street = ls_address_data-street.
+      ls_entityset-house_number = ls_address_data-house_no.
+      ls_entityset-district = ls_address_data-district.
+      ls_entityset-city = ls_address_data-city.
+      ls_entityset-region = ls_address_data-region.
+      ls_entityset-zip_code = ls_address_data-postl_cod1.
+      ls_entityset-country = ls_address_data-country.
+      APPEND ls_entityset TO lt_entityset.
+
+
+    ENDLOOP.
+
+    "Ordenação
+    lt_tech_order = io_tech_request_context->get_orderby( ).
+    IF lines( lt_tech_order ) > 0.
+      LOOP AT lt_tech_order ASSIGNING FIELD-SYMBOL(<tech_order>).
+        APPEND INITIAL LINE TO lt_sort ASSIGNING FIELD-SYMBOL(<sort>).
+        <sort> = VALUE #( name = <tech_order>-property
+                          descending = COND #( WHEN <tech_order>-order = 'desc'
+                                               THEN abap_true
+                                               ELSE abap_false ) ).
+      ENDLOOP.
+
+      SORT lt_entityset BY (lt_sort).
+
+    ENDIF.
+
+
+
+
+    "Return entity set to parameter
+    et_entityset = lt_entityset.
+
+
+  ENDMETHOD.
